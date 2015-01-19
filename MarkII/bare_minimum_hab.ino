@@ -1,4 +1,4 @@
-//#define DEBUG 1
+//#define DEBUG 1 //Uncomment to enable debug messages to the debug pin
 #ifdef DEBUG
 #define LOG_DEBUG(x) debug_serial.print(x)
 #else
@@ -65,7 +65,7 @@ void radio_init() {
 	LOG_DEBUG(F("Done.\n"));
 }
 
-// Send a byte array of UBX protocol to the GPS
+// Send a byte array to the GPS
 void gps_writeArray(uint8_t *MSG, uint8_t len) {
     for(int i=0; i<len; i++) {
         Serial.write(MSG[i]);
@@ -75,6 +75,7 @@ void gps_writeArray(uint8_t *MSG, uint8_t len) {
 
 
 // Calculate expected UBX ACK packet and parse UBX response from GPS
+// Taken from http://ukhas.org.uk/guides:ublox6 and modified
 boolean gps_getUbxAck(uint8_t *MSG) {
     uint8_t b;
     uint8_t ackByteID = 0;
@@ -94,7 +95,7 @@ boolean gps_getUbxAck(uint8_t *MSG) {
     ackPacket[9] = 0;		// CK_B
 
     // Calculate the checksums
-    for (uint8_t i=2; i<8; i++) {
+    for (uint8_t i = 2; i < 8; i++) {
         ackPacket[8] = ackPacket[8] + ackPacket[i];
         ackPacket[9] = ackPacket[9] + ackPacket[8];
     }
@@ -134,7 +135,6 @@ bool gps_init() {
 	Serial.end();
 
 	Serial.begin(GPS_BAUD);
-	//gps_emptyBuffer();
 
 	LOG_DEBUG("Setting uBlox nav mode...\n");
 	uint8_t setNav[] = {
@@ -204,6 +204,7 @@ bool gps_init() {
     return true;
 }
 
+// Empties the hardware serial transmit and receive buffers.
 void gps_emptyBuffer() {
 	Serial.flush();
 	while (Serial.available()) {
@@ -211,6 +212,7 @@ void gps_emptyBuffer() {
 	}	
 }
 
+// Extracts the used info from the GPS module's response and converts this info to the necessary format.
 bool gps_tokenise(char *buff) {
 	char *pt;
 	uint8_t index = 0;
@@ -273,6 +275,7 @@ bool gps_tokenise(char *buff) {
 	return false;
 }
 
+// Polls the GPS module to update flight data
 bool gps_poll() {
 	 unsigned long startTime = millis();
 	 unsigned short timeout = 20000;
@@ -291,6 +294,7 @@ bool gps_poll() {
 	
 	gps_emptyBuffer();
 	
+	// Tickle the GPS
 	Serial.println(F("$PUBX,00*33"));
 	while (!Serial.available());
 	
@@ -304,6 +308,7 @@ bool gps_poll() {
 		
         LOG_DEBUG(b);
 		
+		// The method used here to check the checksum is rather ugly...
         if (b == '*') {
 	        isChecksum = true;
 	        } else if (isChecksum && !hasChecksumFirstChar) {
@@ -328,7 +333,7 @@ bool gps_poll() {
 	
 	return gps_tokenise(buff);
 }
-
+// Converts a hexadecimal character to an unsigned byte
 uint8_t gps_fromHex(char a) {
     if (a >= 'A' && a <= 'F')
         return a - 'A' + 10;
@@ -338,6 +343,7 @@ uint8_t gps_fromHex(char a) {
         return a - '0';
 }
 
+// Constructs an RTTY sentence by combining all data into one string
 char* infoToString() {
     snprintf(sentence_buff, SENTENCE_LENGTH, "%s,%u,%s,%s,%s,%u",
              CALLSIGN,
@@ -346,7 +352,7 @@ char* infoToString() {
              lat,
              lon,
              alt
-            );
+    );
 			
 	char checksum[7];
 	snprintf(checksum, 7, "*%04X\n", generateChecksum(sentence_buff));
@@ -354,6 +360,8 @@ char* infoToString() {
 	memcpy(sentence_buff + strlen(sentence_buff), checksum, strlen(checksum) + 1);
 }
 
+// Taken from http://playground.arduino.cc/Code/PwmFrequency
+// Improves the quality of the NTX2B radio signal a LOT
 void setPwmFrequency(int pin, int divisor) {
     byte mode;
     if(pin == 5 || pin == 6 || pin == 9 || pin == 10) {
@@ -411,13 +419,8 @@ void setPwmFrequency(int pin, int divisor) {
     }
 }
 
-
+// Writes one string to the NTX2B
 void radio_write(char * string) {
-    /* Simple function to sent a char at a time to
-    ** rtty_txbyte function.
-    ** NB Each char is one byte (8 Bits)
-    */
-
     char c;
 
     c = *string++;
@@ -426,29 +429,25 @@ void radio_write(char * string) {
         rtty_txbyte (c);
         c = *string++;
     }
-    //analogWrite(pa, 100);
 }
 
-
+// Writes one byte to the NTX2B
 void rtty_txbyte (char c) {
     int i;
 
-    rtty_txbit (0); // Start bit
-
-    // Send bits for for char LSB first
-
-    for (i=0; i<7; i++) {
+    rtty_txbit(0); // Start bit
+	
+    for (i = 0; i < 7; i++) {
         if (c & 1) rtty_txbit(1);
-
         else rtty_txbit(0);
 
         c = c >> 1;
-
     }
 
-    rtty_txbit (1); // Stop bit
+    rtty_txbit(1); // Stop bit
 }
 
+//Writes one bit to the NTX2B
 void rtty_txbit (int bit) {
     if (bit) {
         // high
@@ -458,10 +457,13 @@ void rtty_txbit (int bit) {
         // low
         analogWrite(RADIO_TX, 100);
     }
+	
+	// 20150 microseconds = 50 baud
     delayMicroseconds(10000);
     delayMicroseconds(10150);
 }
 
+// Generates a checksum for the given data sentence
 unsigned short generateChecksum(const char *s) {
     unsigned short crc = 0xFFFF;
     for (unsigned char i = 0; s[i] != 0x00; i++) {
